@@ -350,7 +350,7 @@ function Dashboard() {
           <Button
             size="icon"
             aria-label="Configurar categorias"
-            className="fixed bottom-24 right-5 z-40 h-12 w-12 rounded-full shadow-lg"
+            className="fixed bottom-24 left-[min(calc(100vw-4.25rem),calc(50%+12rem))] z-40 h-12 w-12 rounded-full shadow-lg"
           >
             <Settings className="h-5 w-5" />
           </Button>
