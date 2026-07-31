@@ -129,6 +129,51 @@ export type Database = {
           },
         ]
       }
+      fixed_expense_payments: {
+        Row: {
+          amount: number
+          created_at: string
+          description: string | null
+          fixed_expense_id: string
+          id: string
+          paid_at: string
+          transaction_id: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string
+          description?: string | null
+          fixed_expense_id: string
+          id?: string
+          paid_at?: string
+          transaction_id?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          description?: string | null
+          fixed_expense_id?: string
+          id?: string
+          paid_at?: string
+          transaction_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fixed_expense_payments_fixed_expense_id_fkey"
+            columns: ["fixed_expense_id"]
+            isOneToOne: false
+            referencedRelation: "fixed_expenses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fixed_expense_payments_transaction_id_fkey"
+            columns: ["transaction_id"]
+            isOneToOne: false
+            referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       goals: {
         Row: {
           created_at: string
