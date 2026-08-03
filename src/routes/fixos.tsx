@@ -133,6 +133,18 @@ function FixedExpensesPage() {
     const used = active.reduce((s, f) => s + (usedByExpense[f.id] ?? 0), 0);
     return { total, used, pending: Math.max(0, total - used) };
   }, [active, usedByExpense]);
+  const sortedList = useMemo(() => {
+    return [...list].sort((a, b) => {
+      const aClosed =
+        !a.is_active || (usedByExpense[a.id] ?? 0) >= a.amount || a.status !== "PENDING";
+      const bClosed =
+        !b.is_active || (usedByExpense[b.id] ?? 0) >= b.amount || b.status !== "PENDING";
+      if (aClosed !== bClosed) return aClosed ? 1 : -1;
+      if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+      if (a.due_day !== b.due_day) return a.due_day - b.due_day;
+      return a.description.localeCompare(b.description, "pt-BR");
+    });
+  }, [list, usedByExpense]);
 
   async function togglePaid(f: FixedExpense) {
     if (!f.account_id) {
@@ -310,7 +322,7 @@ function FixedExpensesPage() {
             Nenhum gasto fixo cadastrado.
           </li>
         )}
-        {list.map((f) => {
+        {sortedList.map((f) => {
           const person = (personsQ.data ?? []).find((p) => p.id === f.person_id);
           const cat = (catsQ.data ?? []).find((c) => c.id === f.category_id);
           const itemPayments = paymentsByExpense[f.id] ?? [];
