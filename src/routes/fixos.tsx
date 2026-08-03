@@ -135,6 +135,13 @@ function FixedExpensesPage() {
   }, [active, usedByExpense]);
 
   async function togglePaid(f: FixedExpense) {
+    if (!f.account_id) {
+      toast.error("Selecione uma conta padrao neste gasto fixo antes de quitar o saldo");
+      setEditing(f);
+      setOpen(true);
+      return;
+    }
+
     if (f.status === "PENDING") {
       const alreadyUsed = usedByExpense[f.id] ?? 0;
       const remaining = Math.max(0, f.amount - alreadyUsed);
@@ -170,10 +177,11 @@ function FixedExpensesPage() {
       if (f.account_id) {
         const acc = (accQ.data ?? []).find((a) => a.id === f.account_id);
         if (acc) {
-          await supabase
+          const { error: accErr } = await supabase
             .from("accounts")
             .update({ current_balance: acc.current_balance - remaining })
             .eq("id", f.account_id);
+          if (accErr) return toast.error(accErr.message);
         }
       }
 
@@ -200,7 +208,10 @@ function FixedExpensesPage() {
       if (error) return toast.error(error.message);
       toast.success("Desfeito");
     }
-    qc.invalidateQueries();
+    qc.invalidateQueries({ queryKey: ["accounts"] });
+    qc.invalidateQueries({ queryKey: ["transactions"] });
+    qc.invalidateQueries({ queryKey: ["fixed_expense_payments"] });
+    qc.invalidateQueries({ queryKey: ["fixed_expenses"] });
   }
 
   async function removePayment(payment: FixedExpensePayment, fixedExpense: FixedExpense) {
@@ -484,6 +495,7 @@ function FixedExpenseUseDialog({
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [paidAt, setPaidAt] = useState(todayValue());
+  const [accountId, setAccountId] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -491,7 +503,8 @@ function FixedExpenseUseDialog({
     setAmount("");
     setDescription(fixedExpense.description);
     setPaidAt(todayValue());
-  }, [open, fixedExpense]);
+    setAccountId(fixedExpense.account_id ?? accounts[0]?.id ?? "");
+  }, [open, fixedExpense, accounts]);
 
   if (!fixedExpense) return null;
 
@@ -505,6 +518,7 @@ function FixedExpenseUseDialog({
     const parsedAmount = parseMoney(amount);
     if (!parsedAmount || parsedAmount <= 0) return toast.error("Informe um valor valido");
     if (!paidAt) return toast.error("Informe a data");
+    if (!accountId) return toast.error("Selecione uma conta para debitar do saldo total");
 
     setSaving(true);
     let transactionId: string | null = null;
@@ -517,7 +531,7 @@ function FixedExpenseUseDialog({
           amount: parsedAmount,
           type: "EXPENSE",
           person_id: fixedExpense.person_id,
-          account_id: fixedExpense.account_id,
+          account_id: accountId,
           category_id: fixedExpense.category_id,
           date: paidAt,
           is_paid: true,
@@ -528,16 +542,14 @@ function FixedExpenseUseDialog({
       if (txErr) throw txErr;
       transactionId = tx.id;
 
-      if (fixedExpense.account_id) {
-        const acc = accounts.find((a) => a.id === fixedExpense.account_id);
-        if (acc) {
-          const { error: accErr } = await supabase
-            .from("accounts")
-            .update({ current_balance: acc.current_balance - parsedAmount })
-            .eq("id", fixedExpense.account_id);
-          if (accErr) throw accErr;
-          balanceUpdated = true;
-        }
+      const acc = accounts.find((a) => a.id === accountId);
+      if (acc) {
+        const { error: accErr } = await supabase
+          .from("accounts")
+          .update({ current_balance: acc.current_balance - parsedAmount })
+          .eq("id", accountId);
+        if (accErr) throw accErr;
+        balanceUpdated = true;
       }
 
       const { error: paymentErr } = await supabase.from("fixed_expense_payments").insert({
@@ -548,6 +560,14 @@ function FixedExpenseUseDialog({
         transaction_id: transactionId,
       });
       if (paymentErr) throw paymentErr;
+
+      if (!fixedExpense.account_id || fixedExpense.account_id !== accountId) {
+        const { error: accountLinkErr } = await supabase
+          .from("fixed_expenses")
+          .update({ account_id: accountId })
+          .eq("id", fixedExpense.id);
+        if (accountLinkErr) throw accountLinkErr;
+      }
 
       const nextStatus = used + parsedAmount >= fixedExpense.amount ? "PAID" : "PENDING";
       const { error: fixedErr } = await supabase
@@ -564,13 +584,13 @@ function FixedExpenseUseDialog({
       onOpenChange(false);
     } catch (err: unknown) {
       if (transactionId) await supabase.from("transactions").delete().eq("id", transactionId);
-      if (balanceUpdated && fixedExpense.account_id) {
-        const acc = accounts.find((a) => a.id === fixedExpense.account_id);
+      if (balanceUpdated) {
+        const acc = accounts.find((a) => a.id === accountId);
         if (acc) {
           await supabase
             .from("accounts")
             .update({ current_balance: acc.current_balance })
-            .eq("id", fixedExpense.account_id);
+            .eq("id", accountId);
         }
       }
       toast.error(getErrorMessage(err));
@@ -628,6 +648,22 @@ function FixedExpenseUseDialog({
           <div>
             <Label>Data</Label>
             <Input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+          </div>
+
+          <div>
+            <Label>Conta para debitar</Label>
+            <Select value={accountId} onValueChange={setAccountId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione uma conta" />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((account) => (
+                  <SelectItem key={account.id} value={account.id}>
+                    {account.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {amount && Number.isFinite(value) && value > 0 && (
@@ -705,6 +741,7 @@ function FixedExpenseDialog({
     if (!value || value <= 0) return toast.error("Informe um valor válido");
     if (!description.trim()) return toast.error("Informe a descrição");
     if (!personId) return toast.error("Selecione quem paga");
+    if (!accountId) return toast.error("Selecione a conta padrao");
 
     setSaving(true);
     try {
